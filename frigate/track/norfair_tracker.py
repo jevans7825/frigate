@@ -180,6 +180,23 @@ class NorfairTracker(ObjectTracker):
         }
 
         self.trackers: dict[str, dict[str, Tracker]] = {}
+        self.default_tracker: dict[str, Tracker] = {}
+        self.ptz_tracking_state = self._get_ptz_tracking_state()
+        self._create_trackers()
+
+        if self.camera_config.onvif.autotracking.enabled:
+            self.ptz_motion_estimator = PtzMotionEstimator(
+                self.camera_config, self.ptz_metrics
+            )
+
+    def _get_ptz_tracking_state(self) -> tuple[bool | None, tuple[str, ...]]:
+        """Get the autotracking settings that decide which tracker each object type uses."""
+        autotracking = self.camera_config.onvif.autotracking
+        return (autotracking.enabled_in_config, tuple(autotracking.track))
+
+    def _create_trackers(self) -> None:
+        """Create the object type and default trackers for the current config."""
+        self.trackers = {}
         # Handle static trackers
         for obj_type, tracker_config in self.object_type_configs.items():
             if obj_type in self.camera_config.objects.track:
@@ -222,11 +239,6 @@ class NorfairTracker(ObjectTracker):
                 filter_factory=self.default_ptz_tracker_config["filter_factory"],  # type: ignore[arg-type]
             ),
         }
-
-        if self.camera_config.onvif.autotracking.enabled:
-            self.ptz_motion_estimator = PtzMotionEstimator(
-                self.camera_config, self.ptz_metrics
-            )
 
     def _create_tracker(self, obj_type: str, tracker_config: dict[str, Any]) -> Tracker:
         """Helper function to create a tracker with given configuration."""
@@ -510,6 +522,18 @@ class NorfairTracker(ObjectTracker):
         frame_time: float,
         detections: list[tuple[Any, Any, Any, Any, Any, Any]],
     ) -> None:
+        # autotracking settings can be changed at runtime, recreate the trackers
+        # so get_tracker never selects a mode that was not created at startup
+        ptz_tracking_state = self._get_ptz_tracking_state()
+
+        if ptz_tracking_state != self.ptz_tracking_state:
+            logger.debug(
+                "%s: autotracking settings changed, recreating object trackers",
+                self.camera_name,
+            )
+            self.ptz_tracking_state = ptz_tracking_state
+            self._create_trackers()
+
         # Group detections by object type
         detections_by_type: dict[str, list[Detection]] = {}
         yuv_frame: np.ndarray | None = None
