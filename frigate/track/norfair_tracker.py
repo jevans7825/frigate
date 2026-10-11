@@ -271,16 +271,23 @@ class NorfairTracker(ObjectTracker):
 
     def get_tracker(self, object_type: str) -> Tracker:
         """Get the appropriate tracker based on object type and camera mode."""
+        autotracking = self.camera_config.onvif.autotracking
+
+        if object_type not in self.trackers:
+            # match_and_update sends objects without their own tracker to the
+            # default tracker for the camera's mode
+            return self.default_tracker[
+                "ptz" if autotracking.enabled_in_config else "static"
+            ]
+
         mode = (
             "ptz"
-            if self.camera_config.onvif.autotracking.enabled_in_config
-            and object_type in self.camera_config.onvif.autotracking.track
+            if autotracking.enabled_in_config
+            and object_type in autotracking.track
             and object_type in self.ptz_object_type_configs.keys()
             else "static"
         )
-        if object_type in self.trackers:
-            return self.trackers[object_type][mode]
-        return self.default_tracker[mode]
+        return self.trackers[object_type][mode]
 
     def register(self, track_id: str, obj: dict[str, Any]) -> None:
         rand_id = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))

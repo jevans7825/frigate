@@ -71,8 +71,10 @@ def _apply_onvif_update(tracker: NorfairTracker, config: FrigateConfig) -> None:
     tracker.camera_config.onvif = config.cameras[CAMERA].onvif
 
 
-def _run_frames(tracker: NorfairTracker, start: float, count: int) -> float:
-    """Feed a stationary person detection for count frames."""
+def _run_frames(
+    tracker: NorfairTracker, start: float, count: int, label: str = "person"
+) -> float:
+    """Feed a stationary detection for count frames."""
     frame_time = start
 
     for _ in range(count):
@@ -81,7 +83,7 @@ def _run_frames(tracker: NorfairTracker, start: float, count: int) -> float:
         tracker.match_and_update(
             "frame",
             frame_time,
-            [("person", 0.9, box, 100 * 300, 100 / 300, (0, 0, 640, 640))],
+            [(label, 0.9, box, 100 * 300, 100 / 300, (0, 0, 640, 640))],
         )
 
     return frame_time
@@ -112,6 +114,7 @@ class TestTrackerRuntimeAutotrackingChanges(unittest.TestCase):
         _run_frames(tracker, frame_time, 10)
 
         self.assertNotIn("person", tracker.trackers)
+        self.assertIs(tracker.get_tracker("person"), tracker.default_tracker["ptz"])
         self.assertEqual(len(tracker.tracked_objects), 1)
 
     def test_enabling_autotracking_uses_ptz_person_tracker(self) -> None:
@@ -135,6 +138,21 @@ class TestTrackerRuntimeAutotrackingChanges(unittest.TestCase):
         _run_frames(tracker, frame_time, 5)
 
         self.assertEqual(set(tracker.tracked_objects), object_ids)
+
+
+class TestTrackerDefaultMode(unittest.TestCase):
+    def test_default_objects_use_ptz_default_tracker(self) -> None:
+        # objects without their own tracker are matched by the default ptz
+        # tracker on an autotracking camera, so get_tracker must return it
+        tracker = _make_tracker(autotracking_enabled=True)
+        _run_frames(tracker, 1000.0, 10, label="dog")
+
+        self.assertIs(tracker.get_tracker("dog"), tracker.default_tracker["ptz"])
+        self.assertEqual(len(tracker.tracked_objects), 1)
+        obj = next(iter(tracker.tracked_objects.values()))
+        # register found the norfair object, so the pre-initialization
+        # detections were carried into the score history
+        self.assertGreater(len(obj["score_history"]), 1)
 
 
 if __name__ == "__main__":
